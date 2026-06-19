@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Parking - Live Monitor</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .glass { background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+    .hidden-section { display: none !important; }
+    .fade-in { animation: fadeIn 0.5s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* Slot Status Colors */
+    .status-free { border-color: #10b981; color: #10b981; }
+    .status-busy { border-color: #ef4444; color: #ef4444; }
+    .status-maint { border-color: #64748b; color: #94a3b8; }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-white min-h-screen overflow-x-hidden">
+
+  <!-- USER NAV -->
+  <nav class="fixed top-0 left-0 w-full bg-slate-900/90 backdrop-blur border-b border-slate-800 z-50 px-6 py-4 flex justify-between items-center shadow-lg">
+    <div class="flex items-center gap-3">
+      <i class="fas fa-parking text-4xl text-teal-500"></i>
+      <div>
+        <h1 class="font-black text-xl tracking-tight">Smart Parking</h1>
+        <p class="text-xs text-gray-400">Live Availability Monitor</p>
+        <!-- ✅ Heartbeat status -->
+        <p id="device-status-user" class="text-xs text-gray-400">Status: --</p>
+      </div>
+    </div>
+    <div>
+      <button onclick="openAdminLogin()" class="text-gray-500 hover:text-white transition text-sm font-semibold border border-slate-700 px-3 py-1 rounded-lg hover:border-slate-500">
+        <i class="fas fa-user-shield"></i> Admin
+      </button>
+    </div>
+  </nav>
+
+  <!-- USER DASHBOARD -->
+  <section id="user-dashboard" class="min-h-screen pt-28 px-4 pb-10">
+    <div class="max-w-6xl mx-auto fade-in">
+
+      <div id="user-stats" class="grid grid-cols-2 gap-4 mb-10">
+        <div class="bg-slate-800 p-6 rounded-2xl border-l-4 border-emerald-500 shadow-lg flex items-center justify-between">
+          <div>
+            <p class="text-gray-400 text-sm font-bold uppercase tracking-wider">Available</p>
+            <h3 class="text-4xl font-black text-emerald-400 mt-1" id="count-free">--</h3>
+          </div>
+          <div class="bg-emerald-500/10 h-12 w-12 rounded-full flex items-center justify-center">
+            <i class="fas fa-check text-2xl text-emerald-500"></i>
+          </div>
+        </div>
+
+        <div class="bg-slate-800 p-6 rounded-2xl border-l-4 border-red-500 shadow-lg flex items-center justify-between">
+          <div>
+            <p class="text-gray-400 text-sm font-bold uppercase tracking-wider">Occupied</p>
+            <h3 class="text-4xl font-black text-red-400 mt-1" id="count-busy">--</h3>
+          </div>
+          <div class="bg-red-500/10 h-12 w-12 rounded-full flex items-center justify-center">
+            <i class="fas fa-car text-2xl text-red-500"></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 mb-6">
+        <div class="h-2 w-2 bg-teal-500 rounded-full animate-pulse"></div>
+        <h2 class="text-xl font-bold text-white">Live Slot Status</h2>
+      </div>
+
+      <div id="slots-container" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <p class="text-center w-full col-span-3 text-gray-500 py-10">Connecting to sensors... 📡</p>
+      </div>
+
+      <div class="mt-12 text-center">
+        <p class="text-gray-500 text-sm">Real-time updates via IoT Sensors</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ADMIN DASHBOARD -->
+  <section id="admin-dashboard" class="hidden-section min-h-screen pt-24 px-4 pb-10 bg-slate-900">
+    <nav class="fixed top-0 left-0 w-full bg-slate-900 border-b border-purple-900 z-50 px-6 py-4 flex justify-between items-center shadow-lg">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-chart-pie text-purple-500 text-2xl"></i>
+        <div>
+          <span class="font-bold text-xl">Admin Control</span>
+          <!-- ✅ Heartbeat status -->
+          <p id="device-status-admin" class="text-xs text-gray-400">Status: --</p>
+        </div>
+      </div>
+      <button onclick="logout()" class="bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition px-4 py-2 rounded-lg font-bold text-sm">
+        Logout <i class="fas fa-sign-out-alt ml-2"></i>
+      </button>
+    </nav>
+
+    <div class="max-w-7xl mx-auto space-y-8 fade-in">
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 lg:col-span-1">
+          <h3 class="font-bold text-gray-400 mb-4 text-sm uppercase">Slot Usage Analytics</h3>
+          <div class="h-48 flex justify-center">
+            <canvas id="liveStatusChart"></canvas>
+          </div>
+          <div class="mt-4 flex justify-center gap-4 text-xs text-gray-400">
+            <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Available</div>
+            <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> Occupied</div>
+            <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-500"></span> Maint.</div>
+          </div>
+        </div>
+
+        <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 lg:col-span-2 flex flex-col justify-center">
+          <div class="flex justify-between items-center mb-6">
+            <h3 class="font-bold text-white text-lg"><i class="fas fa-door-open text-blue-400"></i> Manual Gate Control</h3>
+            <span class="text-xs bg-blue-900/30 text-blue-300 px-2 py-1 rounded border border-blue-500/20">Admin Only</span>
+          </div>
+
+          <div class="flex gap-4">
+            <button onclick="sendGateCmd('OPEN')" class="flex-1 bg-gradient-to-br from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 py-4 rounded-xl font-bold shadow-lg transition flex items-center justify-center gap-2 text-lg">
+              <i class="fas fa-arrow-up"></i> Open Gate
+            </button>
+
+            <!-- ✅ CLOSE disabled لأن ESP32 ما يتعاملش مع CLOSE -->
+            <button disabled
+              title="ESP32 firmware currently supports OPEN only"
+              class="flex-1 opacity-50 cursor-not-allowed bg-gradient-to-br from-red-600 to-red-700 py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 text-lg">
+              <i class="fas fa-arrow-down"></i> Close Gate
+            </button>
+          </div>
+
+          
+        </div>
+      </div>
+
+      <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-xl">
+        <h3 class="font-bold text-white mb-6 border-b border-slate-600 pb-2"><i class="fas fa-tools text-gray-400"></i> Maintenance Control</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="admin-sensors-grid"></div>
+      </div>
+
+      <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-xl">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+          <div>
+            <h3 class="font-bold text-white text-xl"><i class="fas fa-file-invoice text-blue-400"></i> Reports & Statistics</h3>
+            <p class="text-xs text-gray-400">View daily usage logs from sensors</p>
+          </div>
+          <div class="flex items-center gap-2 bg-slate-900 p-2 rounded-lg border border-slate-600">
+            <input type="date" id="report-date" class="bg-slate-800 text-white border-none focus:ring-0 text-sm p-2 rounded" onchange="generateDailyReport()">
+            <button onclick="generateDailyReport()" class="text-blue-400 hover:text-white px-2"><i class="fas fa-search"></i></button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="lg:col-span-2 overflow-x-auto">
+            <table class="w-full text-left text-sm text-gray-300">
+              <thead class="bg-slate-900 text-gray-400 uppercase">
+                <tr>
+                  <th class="px-4 py-3">Slot</th>
+                  <th class="px-4 py-3">Cars Count</th>
+                  <th class="px-4 py-3">Occupied Time</th>
+                  <th class="px-4 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody id="report-table-body" class="divide-y divide-slate-700 bg-slate-800/50">
+                <tr><td colspan="4" class="text-center py-4">Select a date to view report</td></tr>
+              </tbody>
+              <tfoot id="report-table-footer" class="bg-slate-700 font-bold hidden">
+                <tr>
+                  <td class="px-4 py-3 text-white">Total</td>
+                  <td class="px-4 py-3 text-blue-300" id="total-cars-count">0</td>
+                  <td class="px-4 py-3 text-blue-300" id="total-hours-count">0h</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div class="bg-slate-900/50 rounded-xl p-4 border border-slate-700 flex flex-col items-center justify-center">
+            <h4 class="text-xs text-gray-400 mb-2">Slot Usage Comparison</h4>
+            <canvas id="reportChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- AUTH MODAL -->
+  <div id="auth-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+    <div class="bg-slate-800 p-8 rounded-3xl w-full max-w-sm border border-slate-700 shadow-2xl relative">
+      <button onclick="closeModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white"><i class="fas fa-times"></i></button>
+      <h2 class="text-2xl font-bold mb-2 text-center text-white">Admin Access</h2>
+      <p class="text-center text-gray-400 text-sm mb-6">Enter credentials to manage system</p>
+
+      <div class="space-y-4">
+        <input type="text" id="admin-user" placeholder="Admin Username" class="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:border-purple-500 outline-none transition">
+        <input type="password" id="admin-pass" placeholder="Password" class="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:border-purple-500 outline-none transition">
+        <button onclick="performAdminLogin()" class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-xl shadow-lg transition">Login</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 🔥 Firebase Config 🔥
+    const firebaseConfig = {
+      apiKey: "AIzaSyBLVPGh5cV_AHFcVbC8UdTXf3nLjvFgY_4",
+      authDomain: "smartparking-iot-50d4e.firebaseapp.com",
+      databaseURL: "https://smartparking-iot-50d4e-default-rtdb.firebaseio.com",
+      projectId: "smartparking-iot-50d4e",
+      storageBucket: "smartparking-iot-50d4e.firebasestorage.app",
+      messagingSenderId: "276091896194",
+      appId: "1:276091896194:web:c8063527a883d47f0b4f9b"
+    };
+
+    if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+    const db = firebase.database();
+
+    // Global Variables
+    let liveStatusChart = null;
+    let reportChart = null;
+    let lastSlots = {};
+    let lastMaintenance = {};
+    let lastHeartbeat = 0;
+
+    // ✅ HEARTBEAT: update status text
+    function updateHeartbeatStatus(lastHb) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const diff = nowSec - (lastHb || 0);
+
+      const isOnline = lastHb && diff <= 10;
+
+      const userEl = document.getElementById("device-status-user");
+      const adminEl = document.getElementById("device-status-admin");
+
+      const txt = isOnline
+        ? `Status: ONLINE`
+        : `Status: OFFLINE`;
+
+      const cls = isOnline ? "text-xs text-emerald-400" : "text-xs text-red-400";
+
+      if (userEl) { userEl.innerText = txt; userEl.className = cls; }
+      if (adminEl) { adminEl.innerText = txt; adminEl.className = cls; }
+    }
+
+    // keep updating even if firebase doesn't push
+    setInterval(() => updateHeartbeatStatus(lastHeartbeat), 2000);
+
+    // --- 1. Init Charts (Pie + Bar) ---
+    function initCharts() {
+      if (liveStatusChart) liveStatusChart.destroy();
+      if (reportChart) reportChart.destroy();
+
+      // 1. Doughnut Chart (Live Status)
+      const ctx1 = document.getElementById('liveStatusChart').getContext('2d');
+      liveStatusChart = new Chart(ctx1, {
+        type: 'doughnut',
+        data: {
+          labels: ['Available', 'Occupied', 'Maintenance'],
+          datasets: [{
+            data: [3, 0, 0],
+            backgroundColor: ['#10b981', '#ef4444', '#64748b'],
+            hoverOffset: 4,
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, cutout: '70%',
+          plugins: { legend: { display: false } }
+        }
+      });
+
+      // 2. Bar Chart (Reports)
+      const ctx2 = document.getElementById('reportChart').getContext('2d');
+      reportChart = new Chart(ctx2, {
+        type: 'bar',
+        data: {
+          labels: ['Slot 1', 'Slot 2', 'Slot 3'],
+          datasets: [{ label: 'Car Count', data: [0, 0, 0], backgroundColor: '#3b82f6', borderRadius: 5 }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: { ticks: { color: '#9ca3af' }, grid: { color: '#374151' } },
+            x: { ticks: { color: '#9ca3af' } }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+
+      // Set today's date and generate report
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('report-date').value = today;
+      generateDailyReport();
+
+      updateLiveChart(lastSlots, lastMaintenance);
+    }
+
+    // --- 2. Data Listener ---
+    db.ref('parking').on('value', (snapshot) => {
+      const data = snapshot.val() || {};
+      lastSlots = data.slots || {};
+      lastMaintenance = data.maintenance || {};
+
+      // ✅ heartbeat
+      lastHeartbeat = data.last_heartbeat || 0;
+      updateHeartbeatStatus(lastHeartbeat);
+
+      renderUserSlots(lastSlots, lastMaintenance);
+      renderAdminSensors(lastSlots, lastMaintenance);
+      updateLiveChart(lastSlots, lastMaintenance);
+    });
+
+    // --- 3. User Interface ---
+    function renderUserSlots(slots, maintenance) {
+      const container = document.getElementById('slots-container');
+      container.innerHTML = '';
+
+      let freeCount = 0, busyCount = 0;
+
+      [1, 2, 3].forEach(id => {
+        const key = `slot${id}`;
+        const isBusy = slots[key] === true;
+        const isMaint = maintenance[key] === true;
+
+        let statusClass = '', text = '', icon = '', iconColor = '';
+
+        if (isMaint) {
+          statusClass = 'status-maint border-slate-700 bg-slate-900/50';
+          text = 'Under Maintenance';
+          icon = 'fa-tools'; iconColor = 'text-gray-600';
+        } else if (isBusy) {
+          busyCount++;
+          statusClass = 'status-busy bg-red-900/10';
+          text = 'Occupied';
+          icon = 'fa-car'; iconColor = 'text-red-500';
+        } else {
+          freeCount++;
+          statusClass = 'status-free bg-emerald-900/10';
+          text = 'Available';
+          icon = 'fa-check-circle'; iconColor = 'text-emerald-500';
+        }
+
+        container.innerHTML += `
+          <div class="p-6 rounded-2xl border-l-4 shadow-xl transition hover:scale-[1.02] ${statusClass}">
+            <div class="flex justify-between items-start">
+              <div>
+                <h3 class="text-2xl font-bold text-white">Slot A-${id}</h3>
+                <p class="text-sm font-bold uppercase mt-1 opacity-80">${text}</p>
+              </div>
+              <div class="h-12 w-12 rounded-full bg-slate-900 flex items-center justify-center border border-slate-700">
+                <i class="fas ${icon} ${iconColor} text-xl"></i>
+              </div>
+            </div>
+            <div class="mt-6 flex items-center gap-2">
+              <span class="h-2 w-2 rounded-full ${isMaint ? 'bg-gray-500' : (isBusy ? 'bg-red-500' : 'bg-emerald-500')} animate-pulse"></span>
+              <span class="text-xs text-gray-500">Live IoT Sensor</span>
+            </div>
+          </div>`;
+      });
+
+      document.getElementById('count-free').innerText = freeCount;
+      document.getElementById('count-busy').innerText = busyCount;
+    }
+
+    // --- 4. Admin Logic ---
+    function updateLiveChart(slots, maintenance) {
+      let free = 0, busy = 0, maint = 0;
+      [1, 2, 3].forEach(id => {
+        const key = `slot${id}`;
+        if (maintenance[key]) maint++;
+        else if (slots[key]) busy++;
+        else free++;
+      });
+      if (liveStatusChart) {
+        liveStatusChart.data.datasets[0].data = [free, busy, maint];
+        liveStatusChart.update();
+      }
+    }
+
+    // ✅ Maintenance rule:
+    // - Enable "Set Maintenance" ONLY when slot is FREE (not occupied and not maintenance)
+    function renderAdminSensors(slots, maintenance) {
+      const grid = document.getElementById('admin-sensors-grid');
+      grid.innerHTML = '';
+
+      for (let id of [1, 2, 3]) {
+        const key = `slot${id}`;
+        const isPhysical = slots[key] === true;
+        const isMaint = maintenance[key] === true;
+
+        let bgClass = '', statusHtml = '', maintBtn = '';
+
+        if (isMaint) {
+          bgClass = 'bg-slate-700 border-slate-500 opacity-80';
+          statusHtml = '<span class="text-slate-300 font-bold"><i class="fas fa-tools"></i> Maintenance</span>';
+          maintBtn = `<button onclick="toggleMaintenance('${key}', false)" class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded text-sm font-bold">Enable Slot</button>`;
+        } else {
+          if (isPhysical) {
+            bgClass = 'bg-red-900/20 border-red-500/50';
+            statusHtml = '<span class="text-red-400 font-bold">🔴 Occupied</span>';
+
+            // ❌ لا نسمح Maintenance لو slot مشغول
+            maintBtn = `
+              <button disabled title="Cannot set maintenance while occupied"
+                class="mt-3 w-full bg-slate-700 opacity-50 cursor-not-allowed text-gray-300 py-2 rounded text-sm">
+                Set Maintenance
+              </button>
+              <p class="text-xs text-gray-400 mt-2">Maintenance allowed only when slot is FREE.</p>
+            `;
+          } else {
+            bgClass = 'bg-emerald-900/20 border-emerald-500/50';
+            statusHtml = '<span class="text-emerald-400 font-bold">🟢 Available</span>';
+
+            // ✅ يسمح Maintenance لو FREE
+            maintBtn = `<button onclick="toggleMaintenance('${key}', true)" class="mt-3 w-full bg-slate-700 hover:bg-slate-600 text-gray-300 py-2 rounded text-sm">Set Maintenance</button>`;
+          }
+        }
+
+        grid.innerHTML += `
+          <div class="p-4 rounded-xl ${bgClass} border flex flex-col shadow-lg">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-bold text-lg text-white">Slot ${id}</span>
+              ${statusHtml}
+            </div>
+            <div class="mt-auto">${maintBtn}</div>
+          </div>`;
+      }
+    }
+
+    // --- REPORT LOGIC ---
+    function generateDailyReport() {
+      const dateInput = document.getElementById('report-date').value;
+      if (!dateInput) return;
+
+      const tbody = document.getElementById('report-table-body');
+      const tfooter = document.getElementById('report-table-footer');
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4">Analyzing data...</td></tr>';
+      tfooter.classList.add('hidden');
+
+      db.ref(`logs/${dateInput}`).once('value', (snapshot) => {
+        if (!snapshot.exists()) {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500">No data for this date</td></tr>';
+          if (reportChart) { reportChart.data.datasets[0].data = [0, 0, 0]; reportChart.update(); }
+          return;
+        }
+
+        const logs = snapshot.val();
+        let stats = {
+          1: { cars: 0, durationMinutes: 0, lastEnter: null },
+          2: { cars: 0, durationMinutes: 0, lastEnter: null },
+          3: { cars: 0, durationMinutes: 0, lastEnter: null }
+        };
+
+        Object.keys(logs).sort().forEach(key => {
+          const entry = logs[key];
+          const slot = entry.slot;
+
+          if (entry.action === "Enter") {
+            stats[slot].cars++;
+            stats[slot].lastEnter = timeToMins(entry.time);
+          } else if (entry.action === "Exit" && stats[slot].lastEnter !== null) {
+            let duration = timeToMins(entry.time) - stats[slot].lastEnter;
+            if (duration < 0) duration += 24 * 60;
+            stats[slot].durationMinutes += duration;
+            stats[slot].lastEnter = null;
+          }
+        });
+
+        tbody.innerHTML = '';
+        let totalCars = 0, totalMins = 0, chartData = [];
+
+        [1, 2, 3].forEach(id => {
+          const s = stats[id];
+          totalCars += s.cars; totalMins += s.durationMinutes;
+          chartData.push(s.cars);
+
+          const occupancyRate = (s.durationMinutes / 1440) * 100;
+          let statusBadge = '';
+          if (s.cars === 0) statusBadge = '<span class="bg-slate-700 text-gray-400 text-xs px-2 py-1 rounded">Unused</span>';
+          else if (occupancyRate < 15) statusBadge = '<span class="bg-blue-900/50 text-blue-300 text-xs px-2 py-1 rounded border border-blue-500/30">Low Usage</span>';
+          else if (occupancyRate < 60) statusBadge = '<span class="bg-emerald-900/50 text-emerald-300 text-xs px-2 py-1 rounded border border-emerald-500/30">Medium Usage</span>';
+          else statusBadge = '<span class="bg-orange-900/50 text-orange-300 text-xs px-2 py-1 rounded border border-orange-500/30">High Usage</span>';
+
+          tbody.innerHTML += `
+            <tr class="hover:bg-slate-700/50 border-b border-slate-700 transition">
+              <td class="px-4 py-3 font-bold text-white">Slot ${id}</td>
+              <td class="px-4 py-3 text-blue-300 font-mono text-lg">${s.cars}</td>
+              <td class="px-4 py-3 font-mono text-gray-300">${Math.floor(s.durationMinutes/60)}h ${s.durationMinutes%60}m <span class="text-xs text-gray-500">(${occupancyRate.toFixed(1)}%)</span></td>
+              <td class="px-4 py-3">${statusBadge}</td>
+            </tr>`;
+        });
+
+        document.getElementById('total-cars-count').innerText = totalCars;
+        document.getElementById('total-hours-count').innerText = `${Math.floor(totalMins/60)}h ${totalMins%60}m`;
+        tfooter.classList.remove('hidden');
+
+        if (reportChart) { reportChart.data.datasets[0].data = chartData; reportChart.update(); }
+      });
+    }
+
+    function timeToMins(t) {
+      if (!t) return 0;
+      const p = t.split(':');
+      return (parseInt(p[0]) * 60) + parseInt(p[1]);
+    }
+
+    // --- System Functions ---
+    function openAdminLogin() { document.getElementById('auth-modal').classList.remove('hidden'); }
+    function closeModal() { document.getElementById('auth-modal').classList.add('hidden'); }
+
+    function performAdminLogin() {
+      const u = document.getElementById('admin-user').value;
+      const p = document.getElementById('admin-pass').value;
+
+      db.ref('admins').orderByChild('username').equalTo(u).once('value', s => {
+        let valid = false;
+        if (s.exists()) { s.forEach(c => { if (c.val().password == p) valid = true; }); }
+
+        if (valid) {
+          closeModal();
+          document.getElementById('user-dashboard').classList.add('hidden-section');
+          document.getElementById('admin-dashboard').classList.remove('hidden-section');
+          initCharts();
+        } else {
+          alert("Invalid Admin Credentials");
+        }
+      });
+    }
+
+    function logout() { location.reload(); }
+
+    function sendGateCmd(c) {
+      // ✅ Only OPEN is supported by ESP32 firmware in your current code
+      if (c !== "OPEN") {
+        alert("This firmware supports OPEN only.");
+        return;
+      }
+      db.ref('parking/gate_cmd').set(c).then(() => alert("Command sent: " + c));
+    }
+
+    function toggleMaintenance(k, s) {
+      // ✅ enforce rule: cannot set maintenance TRUE if slot is occupied
+      if (s === true) {
+        const isOccupied = lastSlots[k] === true;
+        const isMaint = lastMaintenance[k] === true;
+
+        if (isMaint) {
+          alert("This slot is already under maintenance.");
+          return;
+        }
+        if (isOccupied) {
+          alert("Cannot set maintenance while slot is OCCUPIED. Make it free first.");
+          return;
+        }
+      }
+      db.ref('parking/maintenance/' + k).set(s);
+    }
+  </script>
+
+</body>
+</html>
